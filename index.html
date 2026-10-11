@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Video Delay</title>
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Video Delay">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden;
+    font: 16px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    touch-action: manipulation; -webkit-user-select: none; user-select: none;
+  }
+  #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #view {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; background: #000; display: block;
+  }
+  #view.cover { object-fit: cover; }
+  #view.mirror { transform: scaleX(-1); }
+
+  #status {
+    position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%;
+    transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
+    background: rgba(0,0,0,.6); font-size: 15px; white-space: nowrap; pointer-events: none;
+  }
+  #badge {
+    position: fixed; top: calc(12px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right)); padding: 4px 10px; border-radius: 8px;
+    background: rgba(0,0,0,.5); font-weight: 600; font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+
+  #ui {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 10px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+    background: linear-gradient(transparent, rgba(0,0,0,.8) 35%);
+    display: flex; flex-direction: column; gap: 8px;
+    transition: opacity .2s, transform .2s;
+  }
+  body.hide-ui #ui { opacity: 0; transform: translateY(100%); pointer-events: none; }
+  body.hide-ui #badge { opacity: .55; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row.buttons { flex-wrap: wrap; justify-content: center; }
+  button {
+    font: inherit; color: #fff; background: rgba(255,255,255,.16); border: 0;
+    border-radius: 10px; padding: 10px 14px; min-width: 44px; min-height: 44px; cursor: pointer;
+  }
+  button:active { background: rgba(255,255,255,.3); }
+  button.on { background: #f97316; }
+  input[type=range] { flex: 1; min-width: 0; height: 44px; accent-color: #f97316; }
+  #delayLabel { min-width: 4.2em; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  #start {
+    position: fixed; inset: 0; background: #000; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 24px; text-align: center;
+  }
+  #start h1 { margin: 0; font-size: 28px; }
+  #start p { margin: 0; max-width: 28em; color: #bbb; }
+  #startBtn { background: #f97316; font-size: 20px; font-weight: 600; padding: 14px 36px; }
+  #err { color: #f87171; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="view"></canvas>
+<div id="status" hidden></div>
+<div id="badge" hidden></div>
+
+<div id="ui">
+  <div class="row">
+    <button id="minus" aria-label="1 Sekunde weniger">−1</button>
+    <input id="slider" type="range" min="0" max="30" step="0.5" aria-label="Verzögerung">
+    <button id="plus" aria-label="1 Sekunde mehr">+1</button>
+    <span id="delayLabel"></span>
+  </div>
+  <div class="row buttons">
+    <button id="freeze">Standbild</button>
+    <button id="flip">Kamera</button>
+    <button id="mirror">Spiegeln</button>
+    <button id="fit">Füllen</button>
+    <button id="fs">Vollbild</button>
+  </div>
+</div>
+
+<div id="start">
+  <h1>Video Delay</h1>
+  <p>Zeigt das Kamerabild zeitversetzt. Aufs Bild tippen blendet die Bedienung ein und aus.</p>
+  <button id="startBtn">Start</button>
+  <p id="iosHint" hidden>iPhone: Für Vollbild in Safari auf <b>Teilen → Zum Home-Bildschirm</b> tippen und die App von dort starten.</p>
+  <p id="err"></p>
+</div>
+
+<script>
+// Tuning: lower CAP_FPS (e.g. 24) or MAX_SIDE (e.g. 720) if an older phone stutters.
+const CAP_FPS = 30;      // captured frames per second
+const MAX_SIDE = 960;    // longest side of a buffered frame in px
+const JPEG_Q = 0.7;      // JPEG quality of buffered frames
+const KEEP_EXTRA = 2;    // seconds kept in the buffer beyond the delay
+
+const $ = id => document.getElementById(id);
+const video = $('cam'), view = $('view'), vctx = view.getContext('2d', { alpha: false });
+const cap = document.createElement('canvas'), cctx = cap.getContext('2d', { alpha: false });
+
+function load(key, fallback) {
+  try { const v = localStorage.getItem('vd.' + key); return v === null ? fallback : JSON.parse(v); }
+  catch { return fallback; }
+}
+function save(key, value) { try { localStorage.setItem('vd.' + key, JSON.stringify(value)); } catch {} }
+
+let delay = load('delay', 5);
+let facing = load('facing', 'environment');
+let mirror = load('mirror', false);
+let cover = load('cover', false);
+let frames = [];          // { t: capture time in ms, blob: JPEG }
+let stream = null, frozen = false, encoding = false, decoding = false;
+let lastCap = 0, shown = null, wakeLock = null;
+
+// ---------- camera ----------
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  frames = []; shown = null;
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: CAP_FPS } }
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+function frameSize() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const s = Math.min(1, MAX_SIDE / Math.max(vw, vh));
+  return [Math.round(vw * s), Math.round(vh * s)];
+}
+
+// ---------- capture into buffer ----------
+function scheduleCapture() {
+  if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(capture);
+  else requestAnimationFrame(capture);
+}
+
+function capture() {
+  const now = performance.now();
+  if (delay > 0 && !encoding && video.videoWidth && now - lastCap >= 1000 / CAP_FPS - 2) {
+    lastCap = now;
+    const [w, h] = frameSize();
+    if (cap.width !== w || cap.height !== h) { cap.width = w; cap.height = h; }
+    cctx.drawImage(video, 0, 0, w, h);
+    encoding = true;
+    cap.toBlob(blob => {
+      encoding = false;
+      if (blob) frames.push({ t: now, blob });
+      trim();
+    }, 'image/jpeg', JPEG_Q);
+  }
+  scheduleCapture();
+}
+
+function trim() {
+  const cutoff = performance.now() - (delay + KEEP_EXTRA) * 1000;
+  while (frames.length > 1 && frames[0].t < cutoff) frames.shift();
+}
+
+// ---------- delayed display ----------
+function decode(blob) {
+  if (window.createImageBitmap) return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const img = new Image(), url = URL.createObjectURL(blob);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+function draw(src, w, h) {
+  if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
+  vctx.drawImage(src, 0, 0, w, h);
+}
+
+function setStatus(text) {
+  const el = $('status');
+  if (el.textContent !== text) el.textContent = text;
+  el.hidden = !text;
+}
+
+function render() {
+  requestAnimationFrame(render);
+  if (!stream) return;
+  if (frozen) { setStatus('Standbild'); return; }
+
+  if (delay === 0) {
+    if (video.videoWidth) { const [w, h] = frameSize(); draw(video, w, h); }
+    setStatus('');
+    return;
+  }
+
+  const target = performance.now() - delay * 1000;
+  let i = -1;
+  while (i + 1 < frames.length && frames[i + 1].t <= target) i++;
+  if (i < 0) {
+    const first = frames.length ? frames[0].t : performance.now();
+    setStatus('Puffer füllt sich … ' + Math.max(0, (first - target) / 1000).toFixed(1).replace('.', ',') + ' s');
+    return;
+  }
+  setStatus('');
+
+  const f = frames[i];
+  if (f === shown || decoding) return;
+  decoding = true;
+  decode(f.blob).then(img => {
+    if (!frozen) { draw(img, img.width, img.height); shown = f; }
+    if (img.close) img.close();
+  }).catch(() => {}).finally(() => { decoding = false; });
+}
+
+// ---------- controls ----------
+function setDelay(v) {
+  delay = Math.min(30, Math.max(0, Math.round(v * 2) / 2));
+  $('slider').value = delay;
+  const text = delay.toFixed(1).replace('.', ',') + ' s';
+  $('delayLabel').textContent = text;
+  $('badge').textContent = '−' + text;
+  save('delay', delay);
+  if (delay === 0) { frames = []; shown = null; }
+}
+
+function applyView() {
+  view.classList.toggle('mirror', mirror);
+  view.classList.toggle('cover', cover);
+  $('mirror').classList.toggle('on', mirror);
+  $('fit').classList.toggle('on', cover);
+}
+
+$('slider').addEventListener('input', e => setDelay(+e.target.value));
+$('minus').addEventListener('click', () => setDelay(delay - 1));
+$('plus').addEventListener('click', () => setDelay(delay + 1));
+
+$('freeze').addEventListener('click', () => {
+  frozen = !frozen;
+  $('freeze').classList.toggle('on', frozen);
+});
+
+$('flip').addEventListener('click', async () => {
+  facing = facing === 'environment' ? 'user' : 'environment';
+  mirror = facing === 'user';
+  save('facing', facing); save('mirror', mirror);
+  applyView();
+  try { await startCamera(); } catch (e) { setStatus('Kamera nicht verfügbar'); }
+});
+
+$('mirror').addEventListener('click', () => { mirror = !mirror; save('mirror', mirror); applyView(); });
+$('fit').addEventListener('click', () => { cover = !cover; save('cover', cover); applyView(); });
+
+view.addEventListener('click', () => document.body.classList.toggle('hide-ui'));
+
+// ---------- fullscreen ----------
+const root = document.documentElement;
+const requestFS = root.requestFullscreen || root.webkitRequestFullscreen;
+const exitFS = document.exitFullscreen || document.webkitExitFullscreen;
+const isFS = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const standalone = navigator.standalone === true ||
+  matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+
+function enterFS() {
+  if (!requestFS || standalone || isFS()) return;
+  try { const p = requestFS.call(root, { navigationUI: 'hide' }); if (p) p.catch(() => {}); } catch {}
+}
+
+// iPhone Safari has no Fullscreen API; there the home-screen app is the fullscreen mode.
+if (standalone || !requestFS) $('fs').hidden = true;
+if (!requestFS && !standalone) $('iosHint').hidden = false;
+
+$('fs').addEventListener('click', () => { if (isFS()) exitFS.call(document); else enterFS(); });
+const syncFS = () => $('fs').classList.toggle('on', isFS());
+document.addEventListener('fullscreenchange', syncFS);
+document.addEventListener('webkitfullscreenchange', syncFS);
+
+// ---------- keep screen on ----------
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !stream) return;
+  keepAwake();
+  // iOS stops the camera in the background
+  const track = stream.getVideoTracks()[0];
+  if (!track || track.readyState !== 'live') { try { await startCamera(); } catch {} }
+  else video.play().catch(() => {});
+});
+
+// ---------- start ----------
+$('startBtn').addEventListener('click', async () => {
+  $('err').textContent = '';
+  enterFS();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $('err').textContent = 'Kein Kamerazugriff möglich. Die Seite muss über HTTPS geöffnet werden.';
+    return;
+  }
+  try {
+    await startCamera();
+  } catch (e) {
+    $('err').textContent = e && e.name === 'NotAllowedError'
+      ? 'Kamerazugriff wurde abgelehnt. Bitte in den Browser-Einstellungen erlauben.'
+      : 'Kamera konnte nicht gestartet werden: ' + (e && e.message || e);
+    return;
+  }
+  $('start').hidden = true;
+  $('badge').hidden = false;
+  keepAwake();
+  scheduleCapture();
+  requestAnimationFrame(render);
+});
+
+setDelay(delay);
+applyView();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
