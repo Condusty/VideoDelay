@@ -27,6 +27,14 @@
   #view.cover { object-fit: cover; }
   #view.mirror { transform: scaleX(-1); }
 
+  /* live preview: the camera element itself, shown as a draggable box */
+  #cam.pip {
+    position: fixed; left: 0; top: 0; z-index: 5; width: 30vmax; max-width: 45vw; height: auto;
+    opacity: 1; pointer-events: auto; touch-action: none; cursor: grab; background: #000;
+    border: 2px solid rgba(255,255,255,.75); border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,.6);
+  }
+  #cam.pip.mirror { transform: scaleX(-1); }
+
   #status {
     position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
@@ -89,6 +97,7 @@
     <button id="flip">Kamera</button>
     <button id="mirror">Spiegeln</button>
     <button id="fit">Füllen</button>
+    <button id="pip">Vorschau</button>
     <button id="fs">Vollbild</button>
   </div>
 </div>
@@ -122,6 +131,8 @@ let delay = load('delay', 5);
 let facing = load('facing', 'environment');
 let mirror = load('mirror', false);
 let cover = load('cover', false);
+let pip = load('pip', false);
+let pipPos = load('pipPos', { x: 0, y: 0 });   // position as fraction of the free space, survives rotation
 let frames = [];          // { t: capture time in ms, blob: JPEG }
 let stream = null, frozen = false, encoding = false, decoding = false;
 let lastCap = 0, shown = null, wakeLock = null;
@@ -240,7 +251,49 @@ function applyView() {
   view.classList.toggle('cover', cover);
   $('mirror').classList.toggle('on', mirror);
   $('fit').classList.toggle('on', cover);
+  video.classList.toggle('pip', pip);
+  video.classList.toggle('mirror', mirror);
+  $('pip').classList.toggle('on', pip);
+  placePip();
 }
+
+// ---------- live preview ----------
+const PIP_MARGIN = 8;
+let drag = null;
+
+function pipRoom() {
+  return [Math.max(0, innerWidth - video.offsetWidth - 2 * PIP_MARGIN),
+          Math.max(0, innerHeight - video.offsetHeight - 2 * PIP_MARGIN)];
+}
+
+function placePip() {
+  if (!pip) { video.style.left = video.style.top = ''; return; }
+  const [rx, ry] = pipRoom();
+  video.style.left = PIP_MARGIN + pipPos.x * rx + 'px';
+  video.style.top = PIP_MARGIN + pipPos.y * ry + 'px';
+}
+
+video.addEventListener('pointerdown', e => {
+  if (!pip) return;
+  drag = { dx: e.clientX - video.offsetLeft, dy: e.clientY - video.offsetTop };
+  video.setPointerCapture(e.pointerId);
+});
+video.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const [rx, ry] = pipRoom();
+  const clamp = v => Math.min(1, Math.max(0, v));
+  pipPos = {
+    x: rx ? clamp((e.clientX - drag.dx - PIP_MARGIN) / rx) : 0,
+    y: ry ? clamp((e.clientY - drag.dy - PIP_MARGIN) / ry) : 0
+  };
+  placePip();
+});
+const endDrag = () => { if (drag) { drag = null; save('pipPos', pipPos); } };
+video.addEventListener('pointerup', endDrag);
+video.addEventListener('pointercancel', endDrag);
+video.addEventListener('resize', placePip);
+video.addEventListener('loadedmetadata', placePip);
+window.addEventListener('resize', placePip);
 
 $('slider').addEventListener('input', e => setDelay(+e.target.value));
 $('minus').addEventListener('click', () => setDelay(delay - 1));
@@ -261,6 +314,7 @@ $('flip').addEventListener('click', async () => {
 
 $('mirror').addEventListener('click', () => { mirror = !mirror; save('mirror', mirror); applyView(); });
 $('fit').addEventListener('click', () => { cover = !cover; save('cover', cover); applyView(); });
+$('pip').addEventListener('click', () => { pip = !pip; save('pip', pip); applyView(); });
 
 view.addEventListener('click', () => document.body.classList.toggle('hide-ui'));
 
