@@ -1,5 +1,5 @@
 // Network first, cache as fallback: updates arrive immediately, the app still opens without reception.
-const CACHE = 'video-delay-v1';
+const CACHE = 'video-delay-v2';
 const ASSETS = ['./', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -22,10 +22,13 @@
   #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #view {
     position: fixed; inset: 0; width: 100%; height: 100%;
-    object-fit: contain; background: #000; display: block;
+    object-fit: contain; background: #000; display: block; transform-origin: 50% 50%;
   }
   #view.cover { object-fit: cover; }
-  #view.mirror { transform: scaleX(-1); }
+
+  /* drawing layer: vector drawings on top of the video, only takes input in draw mode */
+  #ink { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  body.drawing #ink { pointer-events: auto; touch-action: none; cursor: crosshair; }
 
   /* live preview: the camera element itself, shown as a draggable box */
   #cam.pip {
@@ -34,38 +37,97 @@
     border: 2px solid rgba(255,255,255,.75); border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,.6);
   }
   #cam.pip.mirror { transform: scaleX(-1); }
+  body.clip #cam.pip { display: none; }
 
   #status {
-    position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%;
+    position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%; z-index: 3;
     transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
     background: rgba(0,0,0,.6); font-size: 15px; white-space: nowrap; pointer-events: none;
   }
   #badge {
-    position: fixed; top: calc(12px + env(safe-area-inset-top));
+    position: fixed; top: calc(12px + env(safe-area-inset-top)); z-index: 3;
     right: calc(12px + env(safe-area-inset-right)); padding: 4px 10px; border-radius: 8px;
-    background: rgba(0,0,0,.5); font-weight: 600; font-variant-numeric: tabular-nums;
+    background: rgba(0,0,0,.6); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums;
     pointer-events: none;
   }
+  body.clip #badge { font-size: 20px; }
+  body.clip #status { top: calc(58px + env(safe-area-inset-top)); }   /* below the frame badge */
 
   #ui {
-    position: fixed; left: 0; right: 0; bottom: 0;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
     padding: 10px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
     background: linear-gradient(transparent, rgba(0,0,0,.8) 35%);
     display: flex; flex-direction: column; gap: 8px;
     transition: opacity .2s, transform .2s;
+    pointer-events: none;   /* empty areas pass taps and drawing through to the image */
   }
-  body.hide-ui #ui { opacity: 0; transform: translateY(100%); pointer-events: none; }
-  body.hide-ui #badge { opacity: .55; }
+  #ui .row > * { pointer-events: auto; }
+  body.hide-ui #ui { opacity: 0; transform: translateY(100%); }
+  body.hide-ui #ui .row > * { pointer-events: none; }
+  body.hide-ui #badge { opacity: .7; }
   .row { display: flex; align-items: center; gap: 8px; }
   .row.buttons { flex-wrap: wrap; justify-content: center; }
+  .sep { width: 1px; align-self: stretch; background: rgba(255,255,255,.25); margin: 0 2px; }
   button {
     font: inherit; color: #fff; background: rgba(255,255,255,.16); border: 0;
     border-radius: 10px; padding: 10px 14px; min-width: 44px; min-height: 44px; cursor: pointer;
+    white-space: nowrap;
   }
   button:active { background: rgba(255,255,255,.3); }
   button.on { background: #f97316; }
+  button.accent { background: #f97316; font-weight: 700; }
   input[type=range] { flex: 1; min-width: 0; height: 44px; accent-color: #f97316; }
-  #delayLabel { min-width: 4.2em; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #delayLabel, #clipLabel { min-width: 4.2em; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #clipLabel { min-width: 5.5em; }
+
+  /* mode-dependent parts of the control bar */
+  body:not(.clip) .clip-only, body.clip .live-only, body:not(.drawing) .draw-only,
+  body.drawing .no-draw { display: none !important; }
+
+  /* landscape phone: compact bar so the image stays large */
+  @media (max-height: 500px) {
+    #ui { gap: 4px; padding-top: 6px; }
+    .row, .row.buttons { gap: 6px; }
+    button { padding: 8px 10px; font-size: 15px; }
+  }
+  body:not(.zoomed) .zoom-only { display: none !important; }
+
+  /* clip timeline */
+  #timeline { position: relative; flex: 1; min-width: 0; height: 44px; touch-action: none; cursor: pointer; }
+  #tlTrack, #tlFill { position: absolute; left: 0; top: 50%; height: 8px; margin-top: -4px; border-radius: 4px; }
+  #tlTrack { right: 0; background: rgba(255,255,255,.25); }
+  #tlFill { width: 0; background: #f97316; }
+  #tlThumb {
+    position: absolute; top: 50%; left: 0; width: 24px; height: 24px; margin: -12px 0 0 -12px;
+    border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #000;
+  }
+  #tlMarks .mark { position: absolute; top: 2px; width: 4px; height: 10px; margin-left: -2px; background: #fde047; border-radius: 2px; }
+
+  /* settings panel */
+  #settings {
+    position: fixed; inset: 0; z-index: 8; background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  #settings .panel {
+    background: #1c1c1e; border-radius: 16px; padding: 16px 18px; width: min(560px, 100%);
+    max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  }
+  #settings .head { display: flex; align-items: center; justify-content: space-between; }
+  #settings h2 { margin: 0; font-size: 20px; }
+  #settings .grid { display: flex; flex-direction: column; gap: 10px; }
+  @media (max-height: 500px) {   /* landscape phone: two columns so everything fits */
+    #settings { padding: 8px; }
+    #settings .panel { width: min(820px, 100%); padding: 10px 14px; gap: 6px; }
+    #settings .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  }
+  .set { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .set > span { flex: 1 0 8em; color: #ccc; }
+  #colorBtn .dot { display: inline-block; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; vertical-align: -4px; }
+
+  /* drawing colors: selected one is marked with a ring and a check, not only by color */
+  .swatch { width: 44px; padding: 0; color: #000; font-weight: 800; border: 3px solid transparent; }
+  .swatch.on { border-color: #fff; outline: 2px solid #000; outline-offset: -5px; }
+  .swatch.on::after { content: "✓"; }
 
   #start {
     position: fixed; inset: 0; background: #000; z-index: 10;
@@ -82,23 +144,81 @@
 <body>
 <video id="cam" playsinline muted autoplay></video>
 <canvas id="view"></canvas>
+<canvas id="ink"></canvas>
 <div id="status" hidden></div>
 <div id="badge" hidden></div>
 
 <div id="ui">
-  <div class="row">
+  <!-- live mode -->
+  <div class="row live-only">
     <button id="minus" aria-label="1 Sekunde weniger">−1</button>
     <input id="slider" type="range" min="0" max="30" step="0.5" aria-label="Verzögerung">
     <button id="plus" aria-label="1 Sekunde mehr">+1</button>
     <span id="delayLabel"></span>
   </div>
-  <div class="row buttons">
+  <div class="row buttons live-only">
+    <button id="clip" class="accent">Clip</button>
     <button id="freeze">Standbild</button>
-    <button id="flip">Kamera</button>
-    <button id="mirror">Spiegeln</button>
-    <button id="fit">Füllen</button>
-    <button id="pip">Vorschau</button>
-    <button id="fs">Vollbild</button>
+    <button class="gear" aria-label="Einstellungen">⚙</button>
+  </div>
+
+  <!-- clip mode -->
+  <div class="row clip-only">
+    <div id="timeline" role="slider" aria-label="Zeitleiste">
+      <div id="tlTrack"></div><div id="tlFill"></div><div id="tlMarks"></div><div id="tlThumb"></div>
+    </div>
+    <span id="clipLabel"></span>
+  </div>
+  <div class="row buttons clip-only no-draw">
+    <button id="backFrame" aria-label="1 Bild zurück">◀ Bild</button>
+    <button id="play" aria-label="Abspielen">▶ Play</button>
+    <button id="fwdFrame" aria-label="1 Bild vor">Bild ▶</button>
+    <button id="speed" aria-label="Geschwindigkeit"></button>
+    <button id="draw">✎ Zeichnen</button>
+    <button id="zoomReset" class="zoom-only">Zoom 1×</button>
+    <button class="gear" aria-label="Einstellungen">⚙</button>
+    <button id="live" class="accent">Live</button>
+  </div>
+
+  <!-- draw mode: tool and color pickers open as an extra row above the bar -->
+  <div class="row buttons draw-only" id="toolPop" hidden>
+    <button data-tool="free">Frei</button>
+    <button data-tool="line">Linie</button>
+    <button data-tool="circle">Kreis</button>
+  </div>
+  <div class="row buttons draw-only" id="colorPop" hidden>
+    <button class="swatch" data-color="#ef4444" aria-label="Rot" style="background:#ef4444"></button>
+    <button class="swatch" data-color="#facc15" aria-label="Gelb" style="background:#facc15"></button>
+    <button class="swatch" data-color="#22c55e" aria-label="Grün" style="background:#22c55e"></button>
+    <button class="swatch" data-color="#38bdf8" aria-label="Blau" style="background:#38bdf8"></button>
+    <button class="swatch" data-color="#ffffff" aria-label="Weiß" style="background:#ffffff"></button>
+  </div>
+  <div class="row buttons draw-only">
+    <button id="toolBtn" aria-label="Werkzeug"></button>
+    <button id="colorBtn" aria-label="Farbe"><span class="dot"></span> ▾</button>
+    <button id="width"></button>
+    <button id="scope" title="Zeichnung nur auf diesem Bild statt über den ganzen Clip"></button>
+    <button id="undo" aria-label="Rückgängig">↶</button>
+    <button id="clear" aria-label="Alles löschen">🗑</button>
+    <button id="drawZoomReset" class="zoom-only">Zoom 1×</button>
+    <button id="drawDone" class="accent">Fertig</button>
+  </div>
+</div>
+
+<!-- settings: everything that is set once and rarely changed -->
+<div id="settings" hidden>
+  <div class="panel" role="dialog" aria-label="Einstellungen">
+    <div class="head"><h2>Einstellungen</h2><button id="setClose" class="accent">Fertig</button></div>
+    <div class="grid">
+    <div class="set"><span>Kamera</span><button id="flip">Vorne / Hinten</button></div>
+    <div class="set"><span>Bild</span><button id="mirror">Spiegeln</button><button id="fit">Füllen</button></div>
+    <div class="set"><span>Live-Vorschau</span><button id="pip">Vorschau</button></div>
+    <div class="set" id="fsRow"><span>Bildschirm</span><button id="fs">Vollbild</button></div>
+    <div class="set"><span>Cliplänge</span>
+      <button data-len="5">5 s</button><button data-len="10">10 s</button><button data-len="20">20 s</button><button data-len="30">30 s</button>
+    </div>
+    <div class="set"><span>Clip abspielen</span><button id="loop">Schleife</button></div>
+    </div>
   </div>
 </div>
 
@@ -112,16 +232,27 @@
 </div>
 
 <script>
+// ======================================================================
+// Settings
+// ======================================================================
 // Tuning: lower CAP_FPS (e.g. 24) or MAX_SIDE (e.g. 720) if an older phone stutters.
 const CAP_FPS = 30;      // captured frames per second
 const MAX_SIDE = 960;    // longest side of a buffered frame in px
 const JPEG_Q = 0.7;      // JPEG quality of buffered frames
-const KEEP_EXTRA = 2;    // seconds kept in the buffer beyond the delay
+const KEEP_EXTRA = 2;    // seconds kept in the buffer beyond the delay / clip length
+// Upper bound for the JPEG buffer. Older frames are dropped beyond it, so on weak
+// devices the clip gets shorter instead of the page crashing.
+const MAX_BYTES = (navigator.deviceMemory && navigator.deviceMemory <= 2 ? 40 : 80) * 1e6;
+const CLIP_LENGTHS = [5, 10, 20, 30];  // seconds
+const SPEEDS = [1, 0.5, 0.25];
+const PREFETCH = 5;      // frames decoded ahead in clip mode
 
 const $ = id => document.getElementById(id);
 const video = $('cam'), view = $('view'), vctx = view.getContext('2d', { alpha: false });
+const ink = $('ink'), ictx = ink.getContext('2d');
 const cap = document.createElement('canvas'), cctx = cap.getContext('2d', { alpha: false });
 
+// Only settings go to localStorage, never video frames or drawings.
 function load(key, fallback) {
   try { const v = localStorage.getItem('vd.' + key); return v === null ? fallback : JSON.parse(v); }
   catch { return fallback; }
@@ -135,14 +266,18 @@ let cover = load('cover', false);
 let pip = load('pip', false);
 let pipPos = load('pipPos', { x: 0, y: 0 });   // position as fraction of the free space, survives rotation
 let pipSize = load('pipSize', 30);             // preview width in % of the longer screen side
-let frames = [];          // { t: capture time in ms, blob: JPEG }
-let stream = null, frozen = false, encoding = false, decoding = false;
+let clipLen = load('clipLen', 30);
+let frames = [], bytes = 0;   // live ring buffer: { t: capture time in ms, blob: JPEG }
+let stream = null, frozen = false, encoding = false, decoding = false, capturing = false;
 let lastCap = 0, shown = null, wakeLock = null;
+let clip = null;              // clip mode state, null in live mode (see "Clip" block)
 
-// ---------- camera ----------
+// ======================================================================
+// Recording: camera and ring buffer
+// ======================================================================
 async function startCamera() {
   if (stream) stream.getTracks().forEach(t => t.stop());
-  frames = []; shown = null;
+  frames = []; bytes = 0; shown = null;
   stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: CAP_FPS } }
@@ -157,15 +292,23 @@ function frameSize() {
   return [Math.round(vw * s), Math.round(vh * s)];
 }
 
-// ---------- capture into buffer ----------
+function startCapture() {
+  if (capturing) return;
+  capturing = true;
+  scheduleCapture();
+}
+
 function scheduleCapture() {
   if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(capture);
   else requestAnimationFrame(capture);
 }
 
+// Always records (also at delay 0), so a clip of the last seconds is available.
+// Stops while a clip is open to save memory and CPU.
 function capture() {
+  if (clip) { capturing = false; return; }
   const now = performance.now();
-  if (delay > 0 && !encoding && video.videoWidth && now - lastCap >= 1000 / CAP_FPS - 2) {
+  if (!encoding && video.videoWidth && now - lastCap >= 1000 / CAP_FPS - 2) {
     lastCap = now;
     const [w, h] = frameSize();
     if (cap.width !== w || cap.height !== h) { cap.width = w; cap.height = h; }
@@ -173,7 +316,7 @@ function capture() {
     encoding = true;
     cap.toBlob(blob => {
       encoding = false;
-      if (blob) frames.push({ t: now, blob });
+      if (blob && !clip) { frames.push({ t: now, blob }); bytes += blob.size; }
       trim();
     }, 'image/jpeg', JPEG_Q);
   }
@@ -181,11 +324,13 @@ function capture() {
 }
 
 function trim() {
-  const cutoff = performance.now() - (delay + KEEP_EXTRA) * 1000;
-  while (frames.length > 1 && frames[0].t < cutoff) frames.shift();
+  const cutoff = performance.now() - (Math.max(delay, clipLen) + KEEP_EXTRA) * 1000;
+  while (frames.length > 1 && (frames[0].t < cutoff || bytes > MAX_BYTES)) bytes -= frames.shift().blob.size;
 }
 
-// ---------- delayed display ----------
+// ======================================================================
+// Live display: delayed frame from the buffer
+// ======================================================================
 function decode(blob) {
   if (window.createImageBitmap) return createImageBitmap(blob);
   return new Promise((resolve, reject) => {
@@ -197,19 +342,26 @@ function decode(blob) {
 }
 
 function draw(src, w, h) {
-  if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
+  if (view.width !== w || view.height !== h) { view.width = w; view.height = h; markInk(); }
   vctx.drawImage(src, 0, 0, w, h);
 }
 
-function setStatus(text) {
+function setStatus(text, force) {
+  if (!force && performance.now() < statusUntil) return;   // a short notice is showing
   const el = $('status');
   if (el.textContent !== text) el.textContent = text;
   el.hidden = !text;
 }
 
-function render() {
+let statusUntil = 0;
+function flashStatus(text, ms) { statusUntil = performance.now() + ms; setStatus(text, true); }
+
+const fmt = (v, d = 1) => v.toFixed(d).replace('.', ',');
+
+function render(now) {
   requestAnimationFrame(render);
   if (!stream) return;
+  if (clip) { renderClip(now); return; }
   if (frozen) { setStatus('Standbild'); return; }
 
   if (delay === 0) {
@@ -223,7 +375,7 @@ function render() {
   while (i + 1 < frames.length && frames[i + 1].t <= target) i++;
   if (i < 0) {
     const first = frames.length ? frames[0].t : performance.now();
-    setStatus('Puffer füllt sich … ' + Math.max(0, (first - target) / 1000).toFixed(1).replace('.', ',') + ' s');
+    setStatus('Puffer füllt sich … ' + fmt(Math.max(0, (first - target) / 1000)) + ' s');
     return;
   }
   setStatus('');
@@ -232,30 +384,486 @@ function render() {
   if (f === shown || decoding) return;
   decoding = true;
   decode(f.blob).then(img => {
-    if (!frozen) { draw(img, img.width, img.height); shown = f; }
+    if (!frozen && !clip) { draw(img, img.width, img.height); shown = f; }
     if (img.close) img.close();
   }).catch(() => {}).finally(() => { decoding = false; });
 }
 
-// ---------- controls ----------
+// ======================================================================
+// View geometry: fit, mirror and zoom shared by video and drawing layer
+// ======================================================================
+const zoom = { z: 1, x: 0, y: 0 };   // scale and pan in screen px, clip mode only
+
+function applyTransform() {
+  view.style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.z})` + (mirror ? ' scaleX(-1)' : '');
+  document.body.classList.toggle('zoomed', zoom.z > 1.01);
+  markInk();
+}
+
+// Where the video image lies on screen, in CSS px.
+function imageRect() {
+  const W = view.clientWidth, H = view.clientHeight;
+  const iw = view.width || 1, ih = view.height || 1;
+  const s = (cover ? Math.max : Math.min)(W / iw, H / ih) * zoom.z;
+  const w = iw * s, h = ih * s;
+  return { x: W / 2 + zoom.x - w / 2, y: H / 2 + zoom.y - h / 2, w, h };
+}
+
+// Image coordinates (0..1, unmirrored) <-> screen px.
+function toScreen([u, v], r) { return [r.x + (mirror ? 1 - u : u) * r.w, r.y + v * r.h]; }
+function toImage(px, py) {
+  const r = imageRect(), u = (px - r.x) / r.w;
+  return [mirror ? 1 - u : u, (py - r.y) / r.h];
+}
+
+function clampPan() {
+  const W = view.clientWidth, H = view.clientHeight;
+  const r = imageRect();
+  const mx = Math.max(0, (r.w - W) / 2), my = Math.max(0, (r.h - H) / 2);
+  zoom.x = Math.min(mx, Math.max(-mx, zoom.x));
+  zoom.y = Math.min(my, Math.max(-my, zoom.y));
+}
+
+function resetZoom() { zoom.z = 1; zoom.x = 0; zoom.y = 0; applyTransform(); }
+
+// ======================================================================
+// Clip: frozen copy of the buffer with timeline playback
+// ======================================================================
+// clip = { frames, t0, t1, pos, playing, base, speed, loop, cache, busy, dir, wanted, shownIdx, ui }
+let speedIdx = 0, loopOn = load('loop', false);
+
+function openClip() {
+  const now = performance.now();
+  const sel = frames.filter(f => f.t >= now - clipLen * 1000);
+  if (sel.length < 2) { flashStatus('Noch keine Aufnahme – kurz warten', 2000); return; }
+  const actual = (sel[sel.length - 1].t - sel[0].t) / 1000;
+  clip = {
+    frames: sel, t0: sel[0].t, t1: sel[sel.length - 1].t,
+    pos: sel[sel.length - 1].t, playing: false, base: null,
+    cache: new Map(), busy: false, dir: -1, wanted: sel.length - 1, shownIdx: -1, ui: ''
+  };
+  frames = []; bytes = 0; shown = null;  // live buffer is released; recording pauses
+  shapes = [];
+  document.body.classList.add('clip');
+  applyPlayOptions();
+  setPlaying(false);
+  updateMarks();
+  resetZoom();
+  flashStatus(actual < clipLen - 0.5
+    ? 'Clip ' + fmt(actual) + ' s (Speichergrenze) – wird nicht gespeichert'
+    : 'Clip wird nicht gespeichert', 2500);
+}
+
+function closeClip() {
+  if (!clip) return;
+  for (const b of clip.cache.values()) if (b && b.close) b.close();
+  clip = null; shapes = []; current = null;
+  setDrawMode(false);
+  document.body.classList.remove('clip');
+  resetZoom();
+  ictx.clearRect(0, 0, ink.width, ink.height);
+  $('badge').textContent = '−' + fmt(delay) + ' s';
+  statusUntil = 0;
+  setStatus('');
+  lastCap = 0;
+  startCapture();
+}
+
+// Last frame with timestamp <= t (binary search).
+function indexAt(t) {
+  const f = clip.frames;
+  let lo = 0, hi = f.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (f[m].t <= t) lo = m; else hi = m - 1; }
+  return lo;
+}
+
+function seek(t) {
+  clip.pos = Math.min(clip.t1, Math.max(clip.t0, t));
+  if (clip.playing) clip.base = { wall: performance.now(), pos: clip.pos };
+}
+
+function stepFrame(d) {
+  setPlaying(false);
+  const i = Math.min(clip.frames.length - 1, Math.max(0, indexAt(clip.pos) + d));
+  clip.pos = clip.frames[i].t;
+}
+
+function stepTime(ms) { setPlaying(false); seek(clip.pos + ms); }
+
+function setPlaying(on) {
+  if (!clip) return;
+  if (on && !clip.loop && clip.pos >= clip.t1) clip.pos = clip.t0;
+  clip.playing = on;
+  clip.base = { wall: performance.now(), pos: clip.pos };
+  $('play').textContent = on ? '❚❚ Pause' : '▶ Play';
+  $('play').setAttribute('aria-label', on ? 'Pause' : 'Abspielen');
+}
+
+function applyPlayOptions() {
+  const sp = SPEEDS[speedIdx];
+  $('speed').textContent = fmt(sp, sp === 1 ? 0 : sp === 0.5 ? 1 : 2) + '×';
+  setOn($('loop'), loopOn);
+  if (clip) { clip.speed = sp; clip.loop = loopOn; if (clip.playing) clip.base = { wall: performance.now(), pos: clip.pos }; }
+}
+
+// Decode only the wanted frame plus a few ahead in the current direction; drop the rest.
+function pump() {
+  const c = clip;
+  if (!c || c.busy) return;
+  const w = c.wanted, n = c.frames.length;
+  let next = -1;
+  if (!c.cache.has(w)) next = w;
+  else for (let k = 1; k <= PREFETCH; k++) {
+    const j = w + c.dir * k;
+    if (j >= 0 && j < n && !c.cache.has(j)) { next = j; break; }
+  }
+  if (next < 0) return;
+  c.busy = true;
+  decode(c.frames[next].blob).then(bmp => {
+    if (clip !== c) { if (bmp.close) bmp.close(); return; }
+    c.cache.set(next, bmp);
+    // While scrubbing fast, show what was requested even if the finger moved on.
+    if (next === w && c.shownIdx !== c.wanted) showFrame(next);
+    evict();
+  }).catch(() => {
+    if (clip === c) { c.cache.set(next, null); flashStatus('Bild konnte nicht geladen werden', 1500); }
+  }).finally(() => { c.busy = false; pump(); });
+}
+
+function evict() {
+  const c = clip, w = c.wanted;
+  const lo = w - (c.dir > 0 ? 2 : PREFETCH + 1), hi = w + (c.dir > 0 ? PREFETCH + 1 : 2);
+  for (const [i, b] of c.cache) {
+    if (i < lo || i > hi) { if (b && b.close) b.close(); c.cache.delete(i); }
+  }
+}
+
+function showFrame(i) {
+  const b = clip.cache.get(i);
+  if (!b) return;
+  draw(b, b.width, b.height);
+  clip.shownIdx = i;
+  markInk();
+}
+
+function renderClip(now) {
+  const c = clip;
+  if (c.playing) {
+    let p = c.base.pos + (now - c.base.wall) * c.speed;
+    if (p >= c.t1) {
+      if (c.loop && c.t1 > c.t0) { p = c.t0 + (p - c.t1) % (c.t1 - c.t0); c.base = { wall: now, pos: p }; }
+      else { p = c.t1; c.pos = p; setPlaying(false); }
+    }
+    c.pos = p;
+  }
+  const w = indexAt(c.pos);
+  if (w !== c.wanted) { if (!c.playing) c.dir = w > c.wanted ? 1 : -1; else c.dir = 1; c.wanted = w; }
+  if (c.shownIdx !== w && c.cache.get(w)) showFrame(w);
+  pump();
+  setStatus('');
+  updateClipUI();
+  renderInk();
+}
+
+function updateClipUI() {
+  const c = clip, n = c.frames.length, i = Math.max(0, c.shownIdx);
+  const rel = (c.frames[i].t - c.t1) / 1000;
+  const text = (rel < -0.05 ? '−' : '') + fmt(Math.abs(rel)) + ' s · Bild ' + (i + 1) + '/' + n;
+  const frac = c.t1 > c.t0 ? (c.pos - c.t0) / (c.t1 - c.t0) : 1;
+  const key = text + '|' + frac.toFixed(4);
+  if (key === c.ui) return;
+  c.ui = key;
+  $('badge').textContent = text;
+  $('clipLabel').textContent = (rel < -0.05 ? '−' : '') + fmt(Math.abs(rel)) + ' s';
+  $('tlFill').style.width = frac * 100 + '%';
+  $('tlThumb').style.left = frac * 100 + '%';
+}
+
+// Ticks on the timeline for frames that carry single-frame drawings.
+function updateMarks() {
+  const box = $('tlMarks');
+  box.textContent = '';
+  if (!clip) return;
+  const span = clip.t1 - clip.t0 || 1;
+  for (const f of new Set(shapes.filter(s => s.f !== null).map(s => s.f))) {
+    const m = document.createElement('div');
+    m.className = 'mark';
+    m.style.left = (clip.frames[f].t - clip.t0) / span * 100 + '%';
+    box.appendChild(m);
+  }
+}
+
+// timeline: tap jumps, drag scrubs
+const timeline = $('timeline');
+let scrubbing = false;
+function scrubTo(e) {
+  const r = timeline.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  seek(clip.t0 + frac * (clip.t1 - clip.t0));
+}
+timeline.addEventListener('pointerdown', e => {
+  if (!clip) return;
+  scrubbing = true;
+  timeline.setPointerCapture(e.pointerId);
+  setPlaying(false);
+  scrubTo(e);
+});
+timeline.addEventListener('pointermove', e => { if (scrubbing && clip) scrubTo(e); });
+timeline.addEventListener('pointerup', () => { scrubbing = false; });
+timeline.addEventListener('pointercancel', () => { scrubbing = false; });
+
+$('clip').addEventListener('click', openClip);
+$('live').addEventListener('click', closeClip);
+$('play').addEventListener('click', () => setPlaying(!clip.playing));
+$('backFrame').addEventListener('click', () => stepFrame(-1));
+$('fwdFrame').addEventListener('click', () => stepFrame(1));
+$('speed').addEventListener('click', () => { speedIdx = (speedIdx + 1) % SPEEDS.length; applyPlayOptions(); });
+$('loop').addEventListener('click', () => { loopOn = !loopOn; save('loop', loopOn); applyPlayOptions(); });
+$('zoomReset').addEventListener('click', resetZoom);
+$('drawZoomReset').addEventListener('click', resetZoom);
+
+function setClipLen(v) {
+  clipLen = v;
+  $('clip').textContent = 'Clip ' + v + ' s';
+  document.querySelectorAll('[data-len]').forEach(b => setOn(b, +b.dataset.len === v));
+  save('clipLen', v);
+}
+document.querySelectorAll('[data-len]').forEach(b => b.addEventListener('click', () => setClipLen(+b.dataset.len)));
+
+// keyboard (computer): space play/pause, arrows step a frame, shift+arrows a second
+document.addEventListener('keydown', e => {
+  if (!clip) return;
+  if (e.key === ' ') { setPlaying(!clip.playing); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') e.shiftKey ? stepTime(-1000) : stepFrame(-1);
+  else if (e.key === 'ArrowRight') e.shiftKey ? stepTime(1000) : stepFrame(1);
+  else if ((e.ctrlKey || e.metaKey) && e.key === 'z') undo();
+});
+
+// ======================================================================
+// Drawing: vector shapes in image coordinates (0..1), never stored
+// ======================================================================
+// shape = { type: 'free'|'line'|'circle', c: color, w: width (fraction of image height),
+//           pts: [[u, v], ...], f: frame index or null for the whole clip }
+const WIDTHS = { thin: 0.006, thick: 0.014 };
+let shapes = [], current = null;
+let tool = load('tool', 'free'), color = load('color', '#facc15');
+let widthKey = load('width', 'thick'), scope = load('scope', 'clip');
+let inkKey = '', inkVersion = 0;
+let lastShape = null;   // drawn in this draw session; the "Nur Bild" box also applies to it
+
+function markInk() { inkVersion++; }
+
+function sizeInk() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(ink.clientWidth * dpr), h = Math.round(ink.clientHeight * dpr);
+  if (ink.width !== w || ink.height !== h) { ink.width = w; ink.height = h; }
+  ictx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function renderInk() {
+  const key = inkVersion + ':' + clip.shownIdx;
+  if (key === inkKey) return;
+  inkKey = key;
+  sizeInk();
+  ictx.clearRect(0, 0, ink.clientWidth, ink.clientHeight);
+  const r = imageRect();
+  for (const s of shapes) if (s.f === null || s.f === clip.shownIdx) drawShape(s, r);
+  if (current) drawShape(current, r);
+}
+
+function drawShape(s, r) {
+  const lw = Math.max(2, s.w * r.h);
+  const P = s.pts.map(p => toScreen(p, r));
+  ictx.save();
+  ictx.strokeStyle = ictx.fillStyle = s.c;
+  ictx.lineWidth = lw; ictx.lineCap = 'round'; ictx.lineJoin = 'round';
+  ictx.shadowColor = 'rgba(0,0,0,.75)'; ictx.shadowBlur = 4;   // contrast on bright backgrounds
+  ictx.beginPath();
+  if (s.type === 'circle') {
+    const [[cx, cy], [ex, ey]] = P;
+    ictx.arc(cx, cy, Math.hypot(ex - cx, ey - cy), 0, Math.PI * 2);
+    ictx.stroke();
+  } else if (P.length === 1) {
+    ictx.arc(P[0][0], P[0][1], lw * 0.75, 0, Math.PI * 2);
+    ictx.fill();
+  } else {
+    ictx.moveTo(P[0][0], P[0][1]);
+    for (let i = 1; i < P.length; i++) ictx.lineTo(P[i][0], P[i][1]);
+    ictx.stroke();
+  }
+  ictx.restore();
+}
+
+function setDrawMode(on) {
+  document.body.classList.toggle('drawing', on);
+  $('draw').classList.toggle('on', on);
+  if (on) document.body.classList.remove('hide-ui');
+  if (!on) { inkPointers.clear(); current = null; pinchZoom = null; lastShape = null; markInk(); }
+  openPop(null);
+}
+
+// tool / color pickers: one open at a time
+function openPop(id) {
+  for (const p of ['toolPop', 'colorPop']) $(p).hidden = p !== id || !$(p).hidden;
+}
+
+function applyDrawOptions() {
+  document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
+  document.querySelectorAll('.swatch').forEach(b => b.classList.toggle('on', b.dataset.color === color));
+  $('toolBtn').textContent = TOOL_NAMES[tool] + ' ▾';
+  $('colorBtn').querySelector('.dot').style.background = color;
+  $('width').textContent = widthKey === 'thick' ? 'Dick' : 'Dünn';
+  $('scope').textContent = (scope === 'frame' ? '☑' : '☐') + ' Nur Bild';
+  $('scope').classList.toggle('on', scope === 'frame');
+  $('scope').setAttribute('aria-pressed', scope === 'frame');
+}
+const TOOL_NAMES = { free: 'Frei', line: 'Linie', circle: 'Kreis' };
+
+function undo() {
+  const s = shapes.pop();
+  if (!s) return;
+  if (s === lastShape) lastShape = null;
+  updateMarks(); markInk();
+}
+
+// "Löschen" needs a second tap within 3 s
+let clearTimer = 0;
+function resetClear() { clearTimeout(clearTimer); clearTimer = 0; $('clear').textContent = '🗑'; $('clear').classList.remove('on'); }
+
+$('draw').addEventListener('click', () => setDrawMode(true));
+$('drawDone').addEventListener('click', () => setDrawMode(false));
+$('toolBtn').addEventListener('click', () => openPop('toolPop'));
+$('colorBtn').addEventListener('click', () => openPop('colorPop'));
+document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => {
+  tool = b.dataset.tool; save('tool', tool); applyDrawOptions(); openPop(null);
+}));
+document.querySelectorAll('.swatch').forEach(b => b.addEventListener('click', () => {
+  color = b.dataset.color; save('color', color); applyDrawOptions(); openPop(null);
+}));
+$('width').addEventListener('click', () => {
+  widthKey = widthKey === 'thick' ? 'thin' : 'thick'; save('width', widthKey); applyDrawOptions();
+});
+$('scope').addEventListener('click', () => {
+  scope = scope === 'clip' ? 'frame' : 'clip'; save('scope', scope); applyDrawOptions();
+  // also applies to the drawing just made, so "draw first, then tick" works
+  if (lastShape) { lastShape.f = scope === 'frame' ? lastShape.at : null; updateMarks(); markInk(); }
+});
+$('undo').addEventListener('click', undo);
+$('clear').addEventListener('click', () => {
+  if (!clearTimer) {
+    $('clear').textContent = 'Alles löschen?'; $('clear').classList.add('on');
+    clearTimer = setTimeout(resetClear, 3000);
+    return;
+  }
+  resetClear();
+  shapes = []; lastShape = null; updateMarks(); markInk();
+});
+
+// one finger draws, two fingers zoom and pan
+const inkPointers = new Map();
+let pinchZoom = null;
+
+function pinchState() {
+  const [a, b] = [...inkPointers.values()];
+  return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+}
+
+ink.addEventListener('pointerdown', e => {
+  if (!clip) return;
+  ink.setPointerCapture(e.pointerId);
+  inkPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  openPop(null);
+  if (inkPointers.size === 1) {
+    setPlaying(false);
+    if (clip.shownIdx < 0) return;
+    current = {
+      id: e.pointerId, type: tool, c: color, w: WIDTHS[widthKey],
+      pts: [toImage(e.clientX, e.clientY)], at: clip.shownIdx, f: scope === 'frame' ? clip.shownIdx : null,
+      sx: e.clientX, sy: e.clientY
+    };
+    if (tool !== 'free') current.pts.push(current.pts[0]);
+  } else if (inkPointers.size === 2) {
+    current = null;
+    const p = pinchState();
+    pinchZoom = { ...p, z: zoom.z, x: zoom.x, y: zoom.y };
+  }
+  markInk();
+});
+
+ink.addEventListener('pointermove', e => {
+  if (!inkPointers.has(e.pointerId)) return;
+  inkPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinchZoom && inkPointers.size >= 2) {
+    const p = pinchState(), s = pinchZoom;
+    const cx = view.clientWidth / 2, cy = view.clientHeight / 2;
+    zoom.z = Math.min(6, Math.max(1, s.z * p.d / s.d));
+    // keep the image point under the fingers' midpoint in place
+    zoom.x = p.mx - cx - (s.mx - cx - s.x) * zoom.z / s.z;
+    zoom.y = p.my - cy - (s.my - cy - s.y) * zoom.z / s.z;
+    clampPan();
+    applyTransform();
+    return;
+  }
+  if (!current || current.id !== e.pointerId) return;
+  const pt = toImage(e.clientX, e.clientY);
+  if (current.type === 'free') {
+    const last = toScreen(current.pts[current.pts.length - 1], imageRect());
+    if (Math.hypot(e.clientX - last[0], e.clientY - last[1]) < 2) return;
+    current.pts.push(pt);
+  } else current.pts[1] = pt;
+  markInk();
+});
+
+function endInk(e) {
+  if (!inkPointers.delete(e.pointerId)) return;
+  if (pinchZoom) { if (inkPointers.size < 2) pinchZoom = null; return; }
+  if (!current || current.id !== e.pointerId) return;
+  const s = current;
+  current = null;
+  const len = Math.hypot(e.clientX - s.sx, e.clientY - s.sy);
+  if (e.type === 'pointerup' && (s.type === 'free' || len > 6)) {
+    lastShape = { type: s.type, c: s.c, w: s.w, pts: s.pts, at: s.at, f: s.f };
+    shapes.push(lastShape);
+    if (s.f !== null) updateMarks();
+  }
+  markInk();
+}
+ink.addEventListener('pointerup', endInk);
+ink.addEventListener('pointercancel', endInk);
+
+// ======================================================================
+// Live controls
+// ======================================================================
+// Toggle buttons show their state by color and by a check mark.
+function setOn(btn, on) {
+  if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+  btn.textContent = btn.dataset.label + (on ? ' ✓' : '');
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', on);
+}
+
+function openSettings(on) { $('settings').hidden = !on; }
+document.querySelectorAll('.gear').forEach(b => b.addEventListener('click', () => openSettings(true)));
+$('setClose').addEventListener('click', () => openSettings(false));
+$('settings').addEventListener('click', e => { if (e.target === $('settings')) openSettings(false); });
+
 function setDelay(v) {
   delay = Math.min(30, Math.max(0, Math.round(v * 2) / 2));
   $('slider').value = delay;
-  const text = delay.toFixed(1).replace('.', ',') + ' s';
+  const text = fmt(delay) + ' s';
   $('delayLabel').textContent = text;
-  $('badge').textContent = '−' + text;
+  if (!clip) $('badge').textContent = '−' + text;
   save('delay', delay);
-  if (delay === 0) { frames = []; shown = null; }
 }
 
 function applyView() {
-  view.classList.toggle('mirror', mirror);
   view.classList.toggle('cover', cover);
-  $('mirror').classList.toggle('on', mirror);
-  $('fit').classList.toggle('on', cover);
+  setOn($('mirror'), mirror);
+  setOn($('fit'), cover);
   video.classList.toggle('pip', pip);
   video.classList.toggle('mirror', mirror);
-  $('pip').classList.toggle('on', pip);
+  setOn($('pip'), pip);
+  applyTransform();
   placePip();
 }
 
@@ -336,7 +944,7 @@ video.addEventListener('pointerup', endPointer);
 video.addEventListener('pointercancel', endPointer);
 video.addEventListener('resize', placePip);
 video.addEventListener('loadedmetadata', placePip);
-window.addEventListener('resize', placePip);
+window.addEventListener('resize', () => { placePip(); if (clip) { clampPan(); applyTransform(); } });
 
 $('slider').addEventListener('input', e => setDelay(+e.target.value));
 $('minus').addEventListener('click', () => setDelay(delay - 1));
@@ -355,7 +963,8 @@ $('flip').addEventListener('click', async () => {
   try { await startCamera(); } catch (e) { setStatus('Kamera nicht verfügbar'); }
 });
 
-$('mirror').addEventListener('click', () => { mirror = !mirror; save('mirror', mirror); applyView(); });
+const toggleMirror = () => { mirror = !mirror; save('mirror', mirror); applyView(); };
+$('mirror').addEventListener('click', toggleMirror);
 $('fit').addEventListener('click', () => { cover = !cover; save('cover', cover); applyView(); });
 $('pip').addEventListener('click', () => { pip = !pip; save('pip', pip); applyView(); });
 
@@ -375,11 +984,11 @@ function enterFS() {
 }
 
 // iPhone Safari has no Fullscreen API; there the home-screen app is the fullscreen mode.
-if (standalone || !requestFS) $('fs').hidden = true;
+if (standalone || !requestFS) $('fsRow').hidden = true;
 if (!requestFS && !standalone) $('iosHint').hidden = false;
 
 $('fs').addEventListener('click', () => { if (isFS()) exitFS.call(document); else enterFS(); });
-const syncFS = () => $('fs').classList.toggle('on', isFS());
+const syncFS = () => setOn($('fs'), isFS());
 document.addEventListener('fullscreenchange', syncFS);
 document.addEventListener('webkitfullscreenchange', syncFS);
 
@@ -416,13 +1025,17 @@ $('startBtn').addEventListener('click', async () => {
   $('start').hidden = true;
   $('badge').hidden = false;
   keepAwake();
-  scheduleCapture();
+  startCapture();
   requestAnimationFrame(render);
 });
 
+if (!CLIP_LENGTHS.includes(clipLen)) clipLen = 30;
 setDelay(delay);
+setClipLen(clipLen);
 setPipSize(pipSize);
 applyView();
+applyPlayOptions();
+applyDrawOptions();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
